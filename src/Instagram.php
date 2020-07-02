@@ -19,7 +19,8 @@ class Instagram
     /**
      * The API base URL.
      */
-    const API_URL = 'https://api.instagram.com/v1/';
+    //const API_URL = 'https://api.instagram.com/v1/';
+    const API_URL = 'https://graph.instagram.com';
 
     /**
      * The API OAuth URL.
@@ -124,7 +125,7 @@ class Instagram
     {
         if (is_array($scopes) && count(array_intersect($scopes, $this->_scopes)) === count($scopes)) {
             return self::API_OAUTH_URL . '?client_id=' . $this->getApiKey() . '&redirect_uri=' . urlencode($this->getApiCallback()) . '&scope=' . implode('+',
-                $scopes) . '&response_type=code';
+                $scopes) . '&response_type=code'; // . '&auth=in';
         }
 
         throw new InstagramException("Error: getLoginUrl() - The parameter isn't an array or invalid scope permissions used.");
@@ -641,6 +642,66 @@ class Instagram
         return json_decode($jsonData);
     }
 
+
+    /**
+     * The new call operator.
+     *
+     * @param string $function API resource path
+     * @param bool $auth Whether the function requires an access token
+     * @param array $params Additional request parameters
+     * @param string $method Request type GET|POST
+     *
+     * @return mixed
+     *
+     * @throws \MetzWeb\Instagram\InstagramException
+     */
+    protected function _makeCallNew($function, $auth = false, $params = null, $method = 'GET')
+    {
+
+        $apiCall = self::API_URL . $function . $authMethod . (('GET' === $method) ? $params : null);
+
+        // we want JSON
+        $headerData = array('Accept: application/json');
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $apiCall);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headerData);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 90);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_HEADER, true);
+
+        switch ($method) {
+            case 'POST':
+                curl_setopt($ch, CURLOPT_POST, count($params));
+                curl_setopt($ch, CURLOPT_POSTFIELDS, ltrim($paramString, '&'));
+                break;
+            case 'DELETE':
+                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+                break;
+        }
+
+        $jsonData = curl_exec($ch);
+        // split header from JSON data
+        // and assign each to a variable
+        list($headerContent, $jsonData) = explode("\r\n\r\n", $jsonData, 2);
+
+        // convert header content into an array
+        $headers = $this->processHeaders($headerContent);
+
+        // get the 'X-Ratelimit-Remaining' header value
+        $this->_xRateLimitRemaining = $headers['X-Ratelimit-Remaining'];
+
+        if (!$jsonData) {
+            throw new InstagramException('Error: _makeCall() - cURL error: ' . curl_error($ch));
+        }
+
+        curl_close($ch);
+
+        return json_decode($jsonData);
+    }
+
     /**
      * The OAuth call operator.
      *
@@ -658,7 +719,8 @@ class Instagram
         curl_setopt($ch, CURLOPT_URL, $apiHost);
         curl_setopt($ch, CURLOPT_POST, count($apiData));
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($apiData));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array('Accept: application/json'));
+        //curl_setopt($ch, CURLOPT_HTTPHEADER, array('Accept: application/json'));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array('application/x-www-form-urlencoded'));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_TIMEOUT, 90);
@@ -825,5 +887,25 @@ class Instagram
     public function setSignedHeader($signedHeader)
     {
         $this->_signedheader = $signedHeader;
+    }
+
+    // tomas
+    /**
+     * Get user profile.
+     *
+     * @param string $id Instagram user id, String token Instagram token
+     *
+     * https://developers.facebook.com/docs/instagram-basic-display-api/getting-started
+     *
+     *
+     * curl -X GET \
+     * 'https://graph.instagram.com/{user-id}?fields=id,username&access_token={access-token}'
+     *
+     * @return mixed
+     */
+    public function getUserProfile($id,$token)
+    {
+        $params = '/' . $id . '?fields=id,username&access_token='.$token;
+        return $this->_makeCallNew('',false, $params, 'GET');
     }
 }
